@@ -196,6 +196,14 @@ func AddExistingVPCFlags(fs *pflag.FlagSet, value *cluster.ExistingVPC) {
 		"The name of the existing subnet that you want to deploy your compute machines to",
 	)
 	SetQuestion(fs, "compute-subnet", "compute subnet:")
+
+	fs.StringVar(
+		&value.VPCProjectID,
+		"vpc-project-id",
+		"",
+		"The name of the project the existing VPC is located for shared VPC on GCP",
+	)
+	SetQuestion(fs, "vpc-project-id", "vpc project id:")
 }
 
 func AddClusterWideProxyFlags(fs *pflag.FlagSet, value *cluster.ClusterWideProxy) {

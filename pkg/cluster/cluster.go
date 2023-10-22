@@ -107,6 +107,7 @@ type ExistingVPC struct {
 	SubnetIDs          string
 	AvailabilityZones  []string
 	VPCName            string
+	VPCProjectID       string
 	ControlPlaneSubnet string
 	ComputeSubnet      string
 }
@@ -398,9 +399,12 @@ func CreateCluster(cmv1Client *cmv1.Client, config Spec, dryRun bool) (*cmv1.Clu
 				)
 
 			if isGCPNetworkExists(config.ExistingVPC) {
-				clusterBuilder =
-					clusterBuilder.GCPNetwork(cmv1.NewGCPNetwork().VPCName(config.ExistingVPC.VPCName).
-						ControlPlaneSubnet(config.ExistingVPC.ControlPlaneSubnet).ComputeSubnet(config.ExistingVPC.ComputeSubnet))
+				gcpNetwork := cmv1.NewGCPNetwork().VPCName(config.ExistingVPC.VPCName).
+					ControlPlaneSubnet(config.ExistingVPC.ControlPlaneSubnet).ComputeSubnet(config.ExistingVPC.ComputeSubnet)
+				if isGCPSharedVPC(config.ExistingVPC) {
+					gcpNetwork = gcpNetwork.VPCProjectID(config.ExistingVPC.VPCProjectID)
+				}
+				clusterBuilder = clusterBuilder.GCPNetwork(gcpNetwork)
 			}
 		default:
 			return nil, fmt.Errorf("Unexpected CCS provider %q", config.Provider)
@@ -488,6 +492,10 @@ func CreateCluster(cmv1Client *cmv1.Client, config Spec, dryRun bool) (*cmv1.Clu
 
 func isGCPNetworkExists(existingVPC ExistingVPC) bool {
 	return existingVPC.VPCName != "" || existingVPC.ControlPlaneSubnet != "" || existingVPC.ComputeSubnet != ""
+}
+
+func isGCPSharedVPC(existingVPC ExistingVPC) bool {
+	return existingVPC.VPCProjectID != ""
 }
 
 func UpdateCluster(client *cmv1.ClustersClient, clusterID string, config Spec) error {
