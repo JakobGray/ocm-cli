@@ -7,8 +7,8 @@ import (
 	"log"
 
 	"github.com/openshift-online/ocm-cli/cmd/ocm/gcp/mock"
-	"github.com/openshift-online/ocm-cli/cmd/ocm/gcp/models"
 	"github.com/openshift-online/ocm-cli/pkg/gcp"
+	"github.com/openshift-online/ocm-cli/pkg/models"
 	"github.com/pkg/errors"
 
 	"github.com/spf13/cobra"
@@ -112,4 +112,12 @@ func deleteWorkloadIdentityPool(ctx context.Context, gcpClient gcp.GcpClient, wi
 
 	log.Printf("Workload identity pool %s deleted", poolName)
 	return nil
+}
+
+func generateServiceAccountID(serviceAccount models.ServiceAccount) string {
+	serviceAccountID := "z-" + serviceAccount.Id
+	if len(serviceAccountID) > 30 {
+		serviceAccountID = serviceAccountID[:30]
+	}
+	return serviceAccountID
 }

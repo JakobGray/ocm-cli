@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/openshift-online/ocm-cli/cmd/ocm/gcp/mock"
-	"github.com/openshift-online/ocm-cli/cmd/ocm/gcp/models"
 	"github.com/openshift-online/ocm-cli/pkg/config"
+	"github.com/openshift-online/ocm-cli/pkg/models"
 	"github.com/openshift-online/ocm-cli/pkg/ocm"
 	"github.com/openshift-online/ocm-cli/pkg/output"
 	"github.com/spf13/cobra"

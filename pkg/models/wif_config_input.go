@@ -9,8 +9,13 @@
  */
 package models
 
-type WifConfigOutput struct {
-	Metadata *WifConfigMetadata `json:"metadata,omitempty"`
-	Spec     *WifConfigInput    `json:"spec,omitempty"`
-	Status   *WifConfigStatus   `json:"status,omitempty"`
+import "encoding/json"
+
+type WifConfigInput struct {
+	DisplayName string `json:"display_name"`
+	ProjectId   string `json:"project_id"`
+}
+
+func (w *WifConfigInput) ToJson() ([]byte, error) {
+	return json.Marshal(w)
 }

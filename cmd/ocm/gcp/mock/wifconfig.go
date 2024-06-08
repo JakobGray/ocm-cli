@@ -1,7 +1,7 @@
 package mock
 
 import (
-	"github.com/openshift-online/ocm-cli/cmd/ocm/gcp/models"
+	"github.com/openshift-online/ocm-cli/pkg/models"
 )
 
 func MockWifConfig(name, id string) *models.WifConfigOutput {

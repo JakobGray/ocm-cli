@@ -11,8 +11,9 @@ import (
 	"github.com/googleapis/gax-go/v2/apierror"
 
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
-	"github.com/openshift-online/ocm-cli/cmd/ocm/gcp/models"
+	"github.com/openshift-online/ocm-cli/pkg/alpha_ocm"
 	"github.com/openshift-online/ocm-cli/pkg/gcp"
+	"github.com/openshift-online/ocm-cli/pkg/models"
 	"github.com/pkg/errors"
 
 	"github.com/spf13/cobra"
@@ -30,12 +31,14 @@ var (
 		TargetDir: "",
 	}
 
+	// The backend should provide this: https://issues.redhat.com/browse/OCM-8658
 	impersonatorServiceAccount = "projects/sda-ccs-3/serviceAccounts/osd-impersonator@sda-ccs-3.iam.gserviceaccount.com"
 )
 
 const (
-	poolDescription = "Created by prototype CLI"
+	poolDescription = "Created by the OCM CLI"
 
+	// The backend should provide this: https://issues.redhat.com/browse/OCM-8658
 	openShiftAudience = "openshift"
 )
 
@@ -48,7 +51,8 @@ func NewCreateWorkloadIdentityConfiguration() *cobra.Command {
 		PersistentPreRun: validationForCreateWorkloadIdentityConfigurationCmd,
 	}
 
-	createWorkloadIdentityPoolCmd.PersistentFlags().StringVar(&CreateWorkloadIdentityConfigurationOpts.Name, "name", "", "User-defined name for all created Google cloud resources (can be separate from the cluster's infra-id)")
+	createWorkloadIdentityPoolCmd.PersistentFlags().StringVar(
+		&CreateWorkloadIdentityConfigurationOpts.Name, "name", "", "User-defined name for all created Google cloud resources")
 	createWorkloadIdentityPoolCmd.MarkPersistentFlagRequired("name")
 	createWorkloadIdentityPoolCmd.PersistentFlags().StringVar(&CreateWorkloadIdentityConfigurationOpts.Project, "project", "", "ID of the Google cloud project")
 	createWorkloadIdentityPoolCmd.MarkPersistentFlagRequired("project")
@@ -82,6 +86,8 @@ func createWorkloadIdentityConfigurationCmd(cmd *cobra.Command, argv []string) {
 		IssuerUrl:              wifConfig.Status.WorkloadIdentityPoolData.IssuerUrl,
 		PoolIdentityProviderId: wifConfig.Status.WorkloadIdentityPoolData.IdentityProviderId,
 	}
+	// Given the number of parameters, these helper functions may benefit from a "parameters" struct.
+	// WDYT?
 	if err = createWorkloadIdentityPool(ctx, gcpClient, poolSpec, CreateWorkloadIdentityConfigurationOpts.DryRun); err != nil {
 		log.Fatalf("Failed to create workload identity pool: %s", err)
 	}
@@ -93,15 +99,16 @@ func createWorkloadIdentityConfigurationCmd(cmd *cobra.Command, argv []string) {
 	if err = createServiceAccounts(ctx, gcpClient, wifConfig, CreateWorkloadIdentityConfigurationOpts.DryRun); err != nil {
 		log.Fatalf("Failed to create IAM service accounts: %s", err)
 	}
-
 }
 
 func validationForCreateWorkloadIdentityConfigurationCmd(cmd *cobra.Command, argv []string) {
 	if CreateWorkloadIdentityConfigurationOpts.Name == "" {
-		panic("Name is required")
+		// I don't think we should panic. Showing the user the backtrace is not
+		// a good experience for users that are not developers.
+		log.Fatal("Name is required")
 	}
 	if CreateWorkloadIdentityConfigurationOpts.Project == "" {
-		panic("Project is required")
+		log.Fatal("Project is required")
 	}
 
 	if CreateWorkloadIdentityConfigurationOpts.TargetDir == "" {
@@ -125,12 +132,18 @@ func validationForCreateWorkloadIdentityConfigurationCmd(cmd *cobra.Command, arg
 	if !sResult.IsDir() {
 		log.Fatalf("file %s exists and is not a directory", fPath)
 	}
-
 }
 
 func createWorkloadIdentityConfiguration(input models.WifConfigInput) (*models.WifConfigOutput, error) {
-	// TODO: Implement the actual creation of the workload identity configuration
-	return mockWifConfig(), nil
+	ocmClient, err := alphaocm.NewOcmClient()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create backend client")
+	}
+	output, err := ocmClient.CreateWifConfig(input)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create wif config")
+	}
+	return &output, nil
 }
 
 func createWorkloadIdentityPool(ctx context.Context, client gcp.GcpClient, spec gcp.WorkloadIdentityPoolSpec, generateOnly bool) error {
@@ -138,81 +151,89 @@ func createWorkloadIdentityPool(ctx context.Context, client gcp.GcpClient, spec 
 	project := spec.ProjectId
 	if generateOnly {
 		log.Printf("Would have created workload identity pool %s", name)
-	} else {
-		parentResourceForPool := fmt.Sprintf("projects/%s/locations/global", project)
-		poolResource := fmt.Sprintf("%s/workloadIdentityPools/%s", parentResourceForPool, name)
-		resp, err := client.GetWorkloadIdentityPool(ctx, poolResource)
-		if resp != nil && resp.State == "DELETED" {
-			log.Printf("Workload identity pool %s was deleted", name)
-			_, err := client.UndeleteWorkloadIdentityPool(ctx, poolResource, &iamv1.UndeleteWorkloadIdentityPoolRequest{})
-			if err != nil {
-				return errors.Wrapf(err, "failed to undelete workload identity pool %s", name)
-			}
-		} else if err != nil {
-			if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 && strings.Contains(gerr.Message, "Requested entity was not found") {
-				pool := &iamv1.WorkloadIdentityPool{
-					Name:        name,
-					DisplayName: name,
-					Description: poolDescription,
-					State:       "ACTIVE",
-					Disabled:    false,
-				}
-
-				_, err := client.CreateWorkloadIdentityPool(ctx, parentResourceForPool, name, pool)
-				if err != nil {
-					return errors.Wrapf(err, "failed to create workload identity pool %s", name)
-				}
-				log.Printf("Workload identity pool created with name %s", name)
-			} else {
-				return errors.Wrapf(err, "failed to check if there is existing workload identity pool %s", name)
-			}
-		} else {
-			log.Printf("Workload identity pool %s already exists", name)
-		}
+		// TODO gcloud command here. Can you create a tech-debt ticket for it?
+		return nil
 	}
+	parentResourceForPool := fmt.Sprintf("projects/%s/locations/global", project)
+	poolResource := fmt.Sprintf("%s/workloadIdentityPools/%s", parentResourceForPool, name)
+	resp, err := client.GetWorkloadIdentityPool(ctx, poolResource)
+	// Ok this is kinda wild syntax but I think it looks cleaner this way. I
+	// want to get your thoughts on it: I think this has the advantage of less
+	// nested if statements, and we are expressing that the execution flow is
+	// parameterized.
+	// Let me know what you think:
+	switch {
+	case err != nil:
+		if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 && strings.Contains(gerr.Message, "Requested entity was not found") {
+			pool := &iamv1.WorkloadIdentityPool{
+				Name:        name,
+				DisplayName: name,
+				Description: poolDescription,
+				State:       "ACTIVE",
+				Disabled:    false,
+			}
 
-	return nil
+			_, err := client.CreateWorkloadIdentityPool(ctx, parentResourceForPool, name, pool)
+			if err != nil {
+				return errors.Wrapf(err, "failed to create workload identity pool %s", name)
+			}
+			log.Printf("Workload identity pool created with name %s", name)
+		} else {
+			return errors.Wrapf(err, "failed to check if there is existing workload identity pool %s", name)
+		}
+		return nil
+	case resp != nil && resp.State == "DELETED":
+		log.Printf("Workload identity pool %s was deleted", name)
+		_, err := client.UndeleteWorkloadIdentityPool(ctx, poolResource, &iamv1.UndeleteWorkloadIdentityPoolRequest{})
+		if err != nil {
+			return errors.Wrapf(err, "failed to undelete workload identity pool %s", name)
+		}
+		return nil
+	default:
+		log.Printf("Workload identity pool %s already exists", name)
+		return nil
+	}
 }
 
 func createWorkloadIdentityProvider(ctx context.Context, client gcp.GcpClient, spec gcp.WorkloadIdentityPoolSpec, generateOnly bool) error {
 	if generateOnly {
 		log.Printf("Would have created workload identity provider for %s with issuerURL %s", spec.PoolName, spec.IssuerUrl)
-	} else {
-		providerResource := fmt.Sprintf("projects/%s/locations/global/workloadIdentityPools/%s/providers/%s", spec.ProjectId, spec.PoolName, spec.PoolName)
-		_, err := client.GetWorkloadIdentityProvider(ctx, providerResource)
-		if err != nil {
-			if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 && strings.Contains(gerr.Message, "Requested entity was not found") {
-				provider := &iam.WorkloadIdentityPoolProvider{
-					Name:        spec.PoolName,
-					DisplayName: spec.PoolName,
-					Description: poolDescription,
-					State:       "ACTIVE",
-					Disabled:    false,
-					Oidc: &iam.Oidc{
-						AllowedAudiences: []string{openShiftAudience},
-						IssuerUri:        spec.IssuerUrl,
-						JwksJson:         spec.Jwks,
-					},
-					AttributeMapping: map[string]string{
-						// when token exchange happens, sub from oidc token shared by operator pod will be mapped to google.subject
-						// field of google auth token. The field is used to allow fine-grained access to gcp service accounts.
-						// The format is `system:serviceaccount:<service_account_namespace>:<service_account_name>`
-						"google.subject": "assertion.sub",
-					},
-				}
-
-				_, err := client.CreateWorkloadIdentityProvider(ctx, fmt.Sprintf("projects/%s/locations/global/workloadIdentityPools/%s", spec.ProjectId, spec.PoolName), spec.PoolName, provider)
-				if err != nil {
-					return errors.Wrapf(err, "failed to create workload identity provider %s", spec.PoolName)
-				}
-				log.Printf("workload identity provider created with name %s", spec.PoolName)
-			} else {
-				return errors.Wrapf(err, "failed to check if there is existing workload identity provider %s in pool %s", spec.PoolName, spec.PoolName)
+		return nil
+	}
+	providerResource := fmt.Sprintf("projects/%s/locations/global/workloadIdentityPools/%s/providers/%s", spec.ProjectId, spec.PoolName, spec.PoolName)
+	_, err := client.GetWorkloadIdentityProvider(ctx, providerResource)
+	if err != nil {
+		if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == 404 && strings.Contains(gerr.Message, "Requested entity was not found") {
+			provider := &iam.WorkloadIdentityPoolProvider{
+				Name:        spec.PoolName,
+				DisplayName: spec.PoolName,
+				Description: poolDescription,
+				State:       "ACTIVE",
+				Disabled:    false,
+				Oidc: &iam.Oidc{
+					AllowedAudiences: []string{openShiftAudience},
+					IssuerUri:        spec.IssuerUrl,
+					JwksJson:         spec.Jwks,
+				},
+				AttributeMapping: map[string]string{
+					// TODO: This will come from the spec
+					// when token exchange happens, sub from oidc token shared by operator pod will be mapped to google.subject
+					// field of google auth token. The field is used to allow fine-grained access to gcp service accounts.
+					// The format is `system:serviceaccount:<service_account_namespace>:<service_account_name>`
+					"google.subject": "assertion.sub",
+				},
 			}
-		} else {
-			log.Printf("Workload identity provider %s already exists in pool %s", spec.PoolName, spec.PoolName)
-		}
 
+			_, err := client.CreateWorkloadIdentityProvider(ctx, fmt.Sprintf("projects/%s/locations/global/workloadIdentityPools/%s", spec.ProjectId, spec.PoolName), spec.PoolName, provider)
+			if err != nil {
+				return errors.Wrapf(err, "failed to create workload identity provider %s", spec.PoolName)
+			}
+			log.Printf("workload identity provider created with name %s", spec.PoolName)
+		} else {
+			return errors.Wrapf(err, "failed to check if there is existing workload identity provider %s in pool %s", spec.PoolName, spec.PoolName)
+		}
+	} else {
+		log.Printf("Workload identity provider %s already exists in pool %s", spec.PoolName, spec.PoolName)
 	}
 	return nil
 }
@@ -245,6 +266,7 @@ func createServiceAccounts(ctx context.Context, gcpClient gcp.GcpClient, wifOutp
 		serviceAccountName := wifOutput.Spec.DisplayName + "-" + serviceAccountID
 		serviceAccountDesc := poolDescription + " for WIF config " + wifOutput.Spec.DisplayName
 
+		// TODO output cleanup
 		fmt.Println("Creating service account", serviceAccountID)
 		_, err := CreateServiceAccount(gcpClient, serviceAccountID, serviceAccountName, serviceAccountDesc, projectId, true)
 		if err != nil {
@@ -285,7 +307,6 @@ func createServiceAccounts(ctx context.Context, gcpClient gcp.GcpClient, wifOutp
 		}
 		fmt.Printf("\t\tAccess granted to %s\n", serviceAccount.Id)
 	}
-
 	return nil
 }
 
@@ -308,208 +329,4 @@ func CreateServiceAccount(gcpClient gcp.GcpClient, svcAcctID, svcAcctName, svcAc
 		}
 	}
 	return svcAcct, err
-}
-
-func generateServiceAccountID(serviceAccount models.ServiceAccount) string {
-	serviceAccountID := "z-" + serviceAccount.Id
-	if len(serviceAccountID) > 30 {
-		serviceAccountID = serviceAccountID[:30]
-	}
-	return serviceAccountID
-}
-
-func mockWifConfig() *models.WifConfigOutput {
-	return &models.WifConfigOutput{
-		Metadata: &models.WifConfigMetadata{
-			DisplayName:  "test01",
-			Id:           "0001",
-			Organization: &models.WifConfigMetadataOrganization{},
-		},
-		Spec: &models.WifConfigInput{
-			DisplayName: "test01",
-			ProjectId:   "sda-ccs-1",
-		},
-		Status: &models.WifConfigStatus{
-			State:    "",
-			Summary:  "",
-			TimeData: models.WifTimeData{},
-			WorkloadIdentityPoolData: models.WifWorkloadIdentityPoolData{
-				IdentityProviderId: "oidc",
-				IssuerUrl:          "https://fake-issuer.com",
-				Jwks:               "{\"keys\":[{\"use\":\"sig\",\"kty\":\"RSA\",\"kid\":\"hZ8yVW_SaRg3zSLz3lZ5D65rHNageE7agstatYTVesA\",\"alg\":\"RS256\",\"n\":\"rKN70G7r_O2untSKxpO2uQQatadzk3d5_0hs_FQGCa_xx0pBRoBMUvdbS4A8quZEoJOk8jmwSGWKvlLk-Is_Rsk0lq3hfKuElYFq43KOHe5YZfmZV7lqCdDr_lIJS2gzjfe_8xTfOUpU_DC0Slrj7UvwpcmpFMtklgeN_LLwuRRD6nKQRx0n0ABBXs44D2s4THrSABvpuOQzBpx9Qx8ShMPdN5h_aePcQj9Ss-lOAqdUprGLU-O-Cm2STUCtHFLh8oB5dYZA2Ww-6RkX7LIj6cVbFwMMZAwLn4ObKE_r6s8yynfS6wvqOldk-pkC0wtQx7R8NoP3ff9RF3kzKrkegdXAkVewUYu6V2Vcl1Z07MmyYcUhcjxT9jOblWklHSYIgyi_n-p30dzL7avU8sSdGnhFrLh8p9d3A1o_g1JNnSTquIHIpyE5WKZyCTF-c2K6VOSRWz16RgI5pswW6-IquJ9g-1RrAsTtuInueYJJw4S32OKRcsanClBKtCg95g1ylZL8UfeQS9S5Q7VNxCUdW7pgtIZiLcPIP8-Ier0yJF5TjnnVwcWs0Rq4-zWV-JyjoqUh6zjR9tqgXdSl1IBl6MqiHGNlW9SF0kRmgtAzm_fwlvqCaEzMW-LEivTUBgwHAvGYftciHFalqbblUNYgJyAy2hZ4-17JJAII8Yk5mZs\",\"e\":\"AQAB\"}]}",
-				PoolId:             "d7a2fb1099634da1a9d0a5e8d1c11c39",
-				ProjectId:          "sda-ccs-1",
-				ProjectNumber:      1008983090557,
-			},
-			ServiceAccounts: []models.ServiceAccount{
-				{
-					Kind:         "ServiceAccount",
-					Id:           "osd-deployer",
-					OsdRole:      "deployer",
-					AccessMethod: "impersonate",
-					Roles: []models.Role{
-						{Kind: "Role", Id: "compute.admin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "dns.admin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.roleAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.securityAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.serviceAccountAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.ServiceAccountKeyAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.ServiceAccountUser", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "storage.admin", Predefined: true, Permissions: []string{}},
-					},
-				},
-				{
-					Kind:         "ServiceAccount",
-					Id:           "osd-support",
-					OsdRole:      "support",
-					AccessMethod: "impersonate",
-					Roles: []models.Role{
-						{Kind: "Role", Id: "compute.admin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "dns.admin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.roleAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.securityAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.serviceAccountAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.ServiceAccountKeyAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.ServiceAccountUser", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "storage.admin", Predefined: true, Permissions: []string{}},
-					},
-				},
-				{
-					Kind:         "ServiceAccount",
-					Id:           "osd-image-registry",
-					OsdRole:      "operator-image-registry",
-					AccessMethod: "wif",
-					Roles: []models.Role{
-						{Kind: "Role", Id: "resourcemanager.tagUser", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "storage.admin", Predefined: true, Permissions: []string{}},
-					},
-					CredentialRequest: models.CredentialRequest{
-						SecretRef: models.SecretRef{
-							Name:      "installer-cloud-credentials",
-							Namespace: "openshift-image-registry",
-						},
-						ServiceAccountNames: []string{
-							"cluster-image-registry-operator",
-							"registry",
-						},
-					},
-				},
-				{
-					Kind:         "ServiceAccount",
-					Id:           "osd-cluster-ingress",
-					OsdRole:      "operator-cluster-ingress",
-					AccessMethod: "wif",
-					Roles: []models.Role{
-						{Kind: "Role", Id: "dns.admin", Predefined: true, Permissions: []string{}},
-					},
-					CredentialRequest: models.CredentialRequest{
-						SecretRef: models.SecretRef{
-							Name:      "cloud-credentials",
-							Namespace: "openshift-ingress-operator",
-						},
-						ServiceAccountNames: []string{
-							"ingress-operator",
-						},
-					},
-				},
-				{
-					Kind:         "ServiceAccount",
-					Id:           "osd-machine-api",
-					OsdRole:      "operator-machine-api",
-					AccessMethod: "wif",
-					Roles: []models.Role{
-						{Kind: "Role", Id: "compute.admin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.serviceAccountUser", Predefined: true, Permissions: []string{}},
-					},
-					CredentialRequest: models.CredentialRequest{
-						SecretRef: models.SecretRef{
-							Name:      "gcp-cloud-credentials",
-							Namespace: "openshift-machine-api",
-						},
-						ServiceAccountNames: []string{
-							"machine-api-controllers",
-						},
-					},
-				},
-				{
-					Kind:         "ServiceAccount",
-					Id:           "osd-cloud-controller-manager",
-					OsdRole:      "operator-cloud-controller-manager",
-					AccessMethod: "wif",
-					Roles: []models.Role{
-						{Kind: "Role", Id: "compute.instanceAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "compute.loadBalancerAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.serviceAccountUser", Predefined: true, Permissions: []string{}},
-					},
-					CredentialRequest: models.CredentialRequest{
-						SecretRef: models.SecretRef{
-							Name:      "gcp-ccm-cloud-credentials",
-							Namespace: "openshift-cloud-controller-manager",
-						},
-						ServiceAccountNames: []string{
-							"cloud-controller-manager",
-						},
-					},
-				},
-				{
-					Kind:         "ServiceAccount",
-					Id:           "osd-cluster-storage",
-					OsdRole:      "operator-cluster-storage",
-					AccessMethod: "wif",
-					Roles: []models.Role{
-						{Kind: "Role", Id: "compute.instanceAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "compute.storageAdmin", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.serviceAccountUser", Predefined: true, Permissions: []string{}},
-					},
-					CredentialRequest: models.CredentialRequest{
-						SecretRef: models.SecretRef{
-							Name:      "gcp-pd-cloud-credentials",
-							Namespace: "openshift-cluster-csi-drivers",
-						},
-						ServiceAccountNames: []string{
-							"gcp-pd-csi-driver-operator",
-							"gcp-pd-csi-driver-controller-sa",
-						},
-					},
-				},
-				{
-					Kind:         "ServiceAccount",
-					Id:           "osd-cloud-credential",
-					OsdRole:      "operator-cloud-credential",
-					AccessMethod: "wif",
-					Roles: []models.Role{
-						{Kind: "Role", Id: "iam.roleViewer", Predefined: true, Permissions: []string{}},
-						{Kind: "Role", Id: "iam.securityReviewer", Predefined: true, Permissions: []string{}},
-					},
-					CredentialRequest: models.CredentialRequest{
-						SecretRef: models.SecretRef{
-							Name:      "cloud-credential-operator-gcp-ro-creds",
-							Namespace: "openshift-cloud-credential-operator",
-						},
-						ServiceAccountNames: []string{
-							"cloud-credential-operator",
-						},
-					},
-				},
-				{
-					Kind:         "ServiceAccount",
-					Id:           "osd-cncc",
-					OsdRole:      "operator-cncc",
-					AccessMethod: "wif",
-					Roles: []models.Role{
-						{Kind: "Role", Id: "compute.admin", Predefined: true, Permissions: []string{}},
-					},
-					CredentialRequest: models.CredentialRequest{
-						SecretRef: models.SecretRef{
-							Name:      "cloud-credentials",
-							Namespace: "openshift-cloud-network-config-controller",
-						},
-						ServiceAccountNames: []string{
-							"cloud-network-config-controller",
-						},
-					},
-				},
-			},
-		},
-	}
 }

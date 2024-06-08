@@ -248,6 +248,7 @@ func (c *gcpClient) RetreiveSecret(secretId string, projectId string) ([]byte, e
 }
 
 type WorkloadIdentityPoolSpec struct {
+	Audience               []string
 	IssuerUrl              string
 	PoolName               string
 	ProjectId              string
