@@ -11,6 +11,8 @@ type options struct {
 	Project                  string
 	WorkloadIdentityPool     string
 	WorkloadIdentityProvider string
+	RolePrefix               string
+	Templates                []string
 	DryRun                   bool
 }
 
