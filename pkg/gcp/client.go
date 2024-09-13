@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"cloud.google.com/go/iam"
 	iamadmin "cloud.google.com/go/iam/admin/apiv1"
@@ -232,4 +233,35 @@ func (c *gcpClient) UndeleteWorkloadIdentityPool(ctx context.Context, resource s
 
 func (c *gcpClient) UpdateRole(ctx context.Context, request *adminpb.UpdateRoleRequest) (*adminpb.Role, error) {
 	return c.iamClient.UpdateRole(ctx, request)
+}
+
+// WithRetry retries the provided function up to 3 times if it returns a retryable error.
+func WithRetry(ctx context.Context, fn func() error) error {
+	const maxTries = 4
+	const retryDelay = 2 * time.Second
+	var err error
+
+	for i := 0; i < maxTries; i++ {
+		err = fn()
+		if err == nil {
+			return nil
+		}
+
+		// Check if the error is retryable based on the error response code.
+		if isRetryableError(err) {
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		return err
+	}
+
+	return err
+}
+
+// isRetryableError checks if the error is retryable based on the error response code.
+func isRetryableError(err error) bool {
+	// Implement logic to check if the error is retryable.
+	// i.e. check for specific error codes or types.
+	return true
 }

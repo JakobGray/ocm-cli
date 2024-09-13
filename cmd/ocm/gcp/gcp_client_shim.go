@@ -431,27 +431,28 @@ func (c *shim) ensurePolicyBindingsForProject(
 	}
 
 	if needPolicyUpdate {
-		return c.setProjectIamPolicy(ctx, policy)
+		return c.setProjectIamPolicyWithRetry(ctx, policy)
 	}
 
 	// If we made it this far there were no updates needed
 	return nil
 }
 
-func (c *shim) setProjectIamPolicy(
+func (c *shim) setProjectIamPolicyWithRetry(
 	ctx context.Context,
 	policy *cloudresourcemanager.Policy,
 ) error {
-	_, err := c.gcpClient.SetProjectIamPolicy(
-		ctx,
-		c.wifConfig.Gcp().ProjectId(),
-		&cloudresourcemanager.SetIamPolicyRequest{
-			Policy: policy,
-		})
-	if err != nil {
-		return fmt.Errorf("error setting project policy: %v", err)
-	}
-	return nil
+	err := gcp.WithRetry(ctx, func() error {
+		var err error
+		_, err = c.gcpClient.SetProjectIamPolicy(
+			ctx,
+			c.wifConfig.Gcp().ProjectId(),
+			&cloudresourcemanager.SetIamPolicyRequest{
+				Policy: policy,
+			})
+		return err
+	})
+	return err
 }
 
 func (c *shim) addPolicyBindingForProject(
