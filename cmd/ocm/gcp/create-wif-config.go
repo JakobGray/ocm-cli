@@ -123,7 +123,7 @@ func createWorkloadIdentityConfigurationCmd(cmd *cobra.Command, argv []string) e
 		return nil
 	}
 
-	gcpClientWifConfigShim := NewGcpClientWifConfigShim(GcpClientWifConfigShimSpec{
+	gcpClientWifConfigShim := gcp.NewWifManager(gcp.WifManagerSpec{
 		GcpClient: gcpClient,
 		WifConfig: wifConfig,
 	})
@@ -133,17 +133,17 @@ func createWorkloadIdentityConfigurationCmd(cmd *cobra.Command, argv []string) e
 		return fmt.Errorf("To clean up, run the following command: ocm gcp delete wif-config %s", wifConfig.ID())
 	}
 
-	if err := gcpClientWifConfigShim.CreateWorkloadIdentityPool(ctx, log); err != nil {
+	if err := gcpClientWifConfigShim.ApplyWorkloadIdentityPool(ctx, log); err != nil {
 		log.Printf("Failed to create workload identity pool: %s", err)
 		return fmt.Errorf("To clean up, run the following command: ocm gcp delete wif-config %s", wifConfig.ID())
 	}
 
-	if err = gcpClientWifConfigShim.CreateWorkloadIdentityProvider(ctx, log); err != nil {
+	if err = gcpClientWifConfigShim.ApplyWorkloadIdentityProvider(ctx, log); err != nil {
 		log.Printf("Failed to create workload identity provider: %s", err)
 		return fmt.Errorf("To clean up, run the following command: ocm gcp delete wif-config %s", wifConfig.ID())
 	}
 
-	if err = gcpClientWifConfigShim.CreateServiceAccounts(ctx, log); err != nil {
+	if err = gcpClientWifConfigShim.ApplyServiceAccounts(ctx, log); err != nil {
 		log.Printf("Failed to create IAM service accounts: %s", err)
 		return fmt.Errorf("To clean up, run the following command: ocm gcp delete wif-config %s", wifConfig.ID())
 	}

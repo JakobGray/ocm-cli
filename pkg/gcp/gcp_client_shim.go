@@ -15,35 +15,59 @@ import (
 	"google.golang.org/api/googleapi"
 	iamv1 "google.golang.org/api/iam/v1"
 	"google.golang.org/grpc/codes"
-
-	"github.com/openshift-online/ocm-cli/pkg/gcp"
 )
 
-type GcpClientWifConfigShim interface {
-	CreateServiceAccounts(ctx context.Context, log *log.Logger) error
-	CreateWorkloadIdentityPool(ctx context.Context, log *log.Logger) error
-	CreateWorkloadIdentityProvider(ctx context.Context, log *log.Logger) error
+const (
+	poolDescription = "Created by the OLM CLI"
+	roleDescription = "Created by the OLM CLI"
+)
+
+type WifManager interface {
+	ApplyAll(ctx context.Context, log *log.Logger) error
+	ApplyServiceAccounts(ctx context.Context, log *log.Logger) error
+	ApplyWorkloadIdentityPool(ctx context.Context, log *log.Logger) error
+	ApplyWorkloadIdentityProvider(ctx context.Context, log *log.Logger) error
 	GrantSupportAccess(ctx context.Context, log *log.Logger) error
 }
 
 type shim struct {
 	wifConfig *cmv1.WifConfig
-	gcpClient gcp.GcpClient
+	gcpClient GcpClient
 }
 
-type GcpClientWifConfigShimSpec struct {
+type WifManagerSpec struct {
 	WifConfig *cmv1.WifConfig
-	GcpClient gcp.GcpClient
+	GcpClient GcpClient
 }
 
-func NewGcpClientWifConfigShim(spec GcpClientWifConfigShimSpec) GcpClientWifConfigShim {
+func NewWifManager(spec WifManagerSpec) WifManager {
 	return &shim{
 		wifConfig: spec.WifConfig,
 		gcpClient: spec.GcpClient,
 	}
 }
 
-func (c *shim) CreateWorkloadIdentityPool(
+func (c *shim) ApplyAll(
+	ctx context.Context,
+	log *log.Logger,
+) error {
+	if err := c.GrantSupportAccess(ctx, log); err != nil {
+		return err
+	}
+	if err := c.ApplyWorkloadIdentityPool(ctx, log); err != nil {
+		return err
+	}
+	if err := c.ApplyWorkloadIdentityProvider(ctx, log); err != nil {
+		return err
+	}
+	if err := c.ApplyServiceAccounts(ctx, log); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *shim) ApplyWorkloadIdentityPool(
 	ctx context.Context,
 	log *log.Logger,
 ) error {
@@ -87,7 +111,7 @@ func (c *shim) CreateWorkloadIdentityPool(
 	return nil
 }
 
-func (c *shim) CreateWorkloadIdentityProvider(
+func (c *shim) ApplyWorkloadIdentityProvider(
 	ctx context.Context,
 	log *log.Logger,
 ) error {
@@ -137,7 +161,7 @@ func (c *shim) CreateWorkloadIdentityProvider(
 	return nil
 }
 
-func (c *shim) CreateServiceAccounts(
+func (c *shim) ApplyServiceAccounts(
 	ctx context.Context,
 	log *log.Logger,
 ) error {
